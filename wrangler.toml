@@ -1,0 +1,27 @@
+name = "curiosity"
+main = "src/worker/index.ts"
+compatibility_date = "2025-03-27"
+compatibility_flags = ["nodejs_compat"]
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+
+[ai]
+binding = "AI"
+
+[browser]
+binding = "BROWSER"
+
+[[vectorize]]
+binding = "VECTOR_INDEX"
+index_name = "curiosity-knowledge"
+
+[[durable_objects.bindings]]
+name = "SESSION"
+class_name = "SessionDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["SessionDO"]
