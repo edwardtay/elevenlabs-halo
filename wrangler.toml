@@ -1,4 +1,4 @@
-name = "curiosity"
+name = "halo"
 main = "src/worker/index.ts"
 compatibility_date = "2025-03-27"
 compatibility_flags = ["nodejs_compat"]
@@ -19,9 +19,14 @@ binding = "VECTOR_INDEX"
 index_name = "curiosity-knowledge"
 
 [[durable_objects.bindings]]
-name = "SESSION"
-class_name = "SessionDO"
+name = "HALO_AGENT"
+class_name = "HaloAgent"
 
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["SessionDO"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["HaloAgent"]
+deleted_classes = ["SessionDO"]
