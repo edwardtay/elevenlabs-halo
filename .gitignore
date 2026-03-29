@@ -3,4 +3,6 @@ dist/
 .dev.vars
 .wrangler/
 .playwright-mcp/
+.claude/
 CLAUDE.md
+docs/superpowers/
