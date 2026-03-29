@@ -1,1 +1,79 @@
 @import 'tailwindcss';
+
+:root {
+  --color-bg: #fafaf9;
+  --color-surface: #ffffff;
+  --color-surface-2: #f5f5f4;
+  --color-border: #e7e5e4;
+  --color-border-light: #d6d3d1;
+  --color-text: #1c1917;
+  --color-text-muted: #78716c;
+  --color-text-dim: #a8a29e;
+  --color-accent: #f6821f;
+  --color-accent-light: #fbad41;
+  --color-accent-dim: rgba(246, 130, 31, 0.08);
+  --color-success: #16a34a;
+  --color-danger: #dc2626;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: 'Roboto Mono', 'SF Mono', monospace;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+  margin: 0;
+  overflow: hidden;
+}
+
+/* Soft radial glow */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 70% 50% at 50% 30%, rgba(246, 130, 31, 0.04) 0%, transparent 70%),
+    radial-gradient(ellipse 50% 40% at 80% 80%, rgba(251, 173, 65, 0.03) 0%, transparent 50%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulse-ring {
+  0%, 100% { transform: scale(1); opacity: 0.4; }
+  50% { transform: scale(1.08); opacity: 0.7; }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-5px); }
+}
+
+@keyframes listening-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(246, 130, 31, 0.2); }
+  50% { box-shadow: 0 0 0 20px rgba(246, 130, 31, 0); }
+}
+
+.animate-in { animation: fadeUp 0.7s ease-out both; }
+.animate-in-delay-1 { animation: fadeUp 0.7s ease-out 0.12s both; }
+.animate-in-delay-2 { animation: fadeUp 0.7s ease-out 0.24s both; }
+.animate-in-delay-3 { animation: fadeUp 0.7s ease-out 0.4s both; }
+.float { animation: float 5s ease-in-out infinite; }
+.listening-pulse { animation: listening-pulse 2s ease-in-out infinite; }
+
+/* Hide the ElevenLabs widget — we trigger it programmatically via our own button */
+elevenlabs-convai {
+  position: fixed !important;
+  bottom: -500px !important;
+  right: -500px !important;
+  width: 1px !important;
+  height: 1px !important;
+  overflow: hidden !important;
+}
+
