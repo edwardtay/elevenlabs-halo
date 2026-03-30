@@ -169,7 +169,7 @@ export async function handleLLMChat(request: Request, env: Env, ctx?: ExecutionC
       model: '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
       messages: enrichedMessages,
       stream: body.stream ?? true,
-      ...(body.tools && body.tools.length > 0 ? { tools: body.tools } : {}),
+      // Do NOT pass tools — Custom LLM should only return text
     }),
   });
 
