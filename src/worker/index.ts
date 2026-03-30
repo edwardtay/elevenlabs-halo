@@ -8,6 +8,11 @@ const CORS_HEADERS = {
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 
+const CHAT_COMPLETION_PATHS = new Set([
+  '/api/llm/chat',
+  '/api/llm/chat/chat/completions',
+]);
+
 function corsResponse(response: Response): Response {
   const headers = new Headers(response.headers);
   for (const [k, v] of Object.entries(CORS_HEADERS)) {
@@ -24,6 +29,20 @@ function doStub(env: Env) {
   return env.HALO_AGENT.get(env.HALO_AGENT.idFromName('default'));
 }
 
+function isChatCompletionRequest(url: URL, method: string): boolean {
+  return method === 'POST' && CHAT_COMPLETION_PATHS.has(url.pathname);
+}
+
+function handleHealthCheck(url: URL): Response {
+  return Response.json({
+    ok: true,
+    service: 'halo',
+    timestamp: new Date().toISOString(),
+    chatCompletionPaths: Array.from(CHAT_COMPLETION_PATHS),
+    route: url.pathname,
+  });
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     if (request.method === 'OPTIONS') {
@@ -33,7 +52,10 @@ export default {
     const url = new URL(request.url);
 
     try {
-      if (url.pathname === '/api/llm/chat' && request.method === 'POST') {
+      if (url.pathname === '/api/health' && request.method === 'GET') {
+        return corsResponse(handleHealthCheck(url));
+      }
+      if (isChatCompletionRequest(url, request.method)) {
         const { handleLLMChat } = await import('./llm');
         return corsResponse(await handleLLMChat(request, env, ctx));
       }

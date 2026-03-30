@@ -10,23 +10,68 @@ export function App() {
   const [showAbout, setShowAbout] = useState(false);
   const [showDashboard, setShowDashboard] = useState(false);
   const [wakeWordStatus, setWakeWordStatus] = useState<'idle' | 'listening' | 'heard'>('idle');
+  const [sessionError, setSessionError] = useState<string | null>(null);
   const recognitionRef = useRef<any>(null);
+  const isStartingSessionRef = useRef(false);
+  const shouldListenForWakeWordRef = useRef(true);
 
   const { startSession, endSession } = useConversationControls();
   const { status } = useConversationStatus();
   const { isSpeaking } = useConversationMode();
 
   const isActive = status === 'connected';
+  const isConnecting = status === 'connecting';
 
   // Wake word detection
-  const handleStartSession = useCallback(() => {
-    startSession();
-  }, [startSession]);
+  const stopWakeWordListening = useCallback(() => {
+    shouldListenForWakeWordRef.current = false;
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+      recognitionRef.current = null;
+    }
+    setWakeWordStatus('idle');
+  }, []);
+
+  const handleStartSession = useCallback(async () => {
+    if (isActive || isConnecting || isStartingSessionRef.current) return;
+
+    isStartingSessionRef.current = true;
+    shouldListenForWakeWordRef.current = false;
+    setSessionError(null);
+    stopWakeWordListening();
+
+    try {
+      await startSession({
+        connectionType: 'websocket',
+        onError: (message, context) => {
+          console.error('[Halo] Conversation error:', message, context);
+          setSessionError(message);
+        },
+        onDebug: (info) => {
+          console.debug('[Halo] Conversation debug:', info);
+        },
+        onDisconnect: (details) => {
+          console.log('[Halo] Conversation ended:', details);
+          isStartingSessionRef.current = false;
+        },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to start conversation.';
+      console.error('[Halo] Failed to start session:', error);
+      setSessionError(message);
+      isStartingSessionRef.current = false;
+      shouldListenForWakeWordRef.current = true;
+      setWakeWordStatus('idle');
+    }
+  }, [isActive, isConnecting, startSession, stopWakeWordListening]);
 
   const startWakeWordListening = useCallback(() => {
+    if (isActive || isConnecting || isStartingSessionRef.current || recognitionRef.current) return;
+
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) return;
 
+    shouldListenForWakeWordRef.current = true;
     const recognition = new SR();
     recognition.continuous = true;
     recognition.interimResults = true;
@@ -45,6 +90,7 @@ export function App() {
         if (match) {
           console.log('[Halo] Wake word detected!');
           setWakeWordStatus('heard');
+          shouldListenForWakeWordRef.current = false;
           recognition.stop();
           recognitionRef.current = null;
           setTimeout(() => handleStartSession(), 500);
@@ -54,13 +100,13 @@ export function App() {
     };
 
     recognition.onend = () => {
-      if (recognitionRef.current) {
+      if (recognitionRef.current === recognition && shouldListenForWakeWordRef.current) {
         try { recognition.start(); } catch {}
       }
     };
 
     recognition.onerror = () => {
-      if (recognitionRef.current) {
+      if (recognitionRef.current === recognition && shouldListenForWakeWordRef.current) {
         setTimeout(() => { try { recognition.start(); } catch {} }, 1000);
       }
     };
@@ -68,15 +114,7 @@ export function App() {
     recognitionRef.current = recognition;
     recognition.start();
     setWakeWordStatus('listening');
-  }, [handleStartSession]);
-
-  const stopWakeWordListening = useCallback(() => {
-    if (recognitionRef.current) {
-      recognitionRef.current.stop();
-      recognitionRef.current = null;
-    }
-    setWakeWordStatus('idle');
-  }, []);
+  }, [handleStartSession, isActive, isConnecting]);
 
   // Auto-start wake word on mount
   useEffect(() => {
@@ -94,6 +132,33 @@ export function App() {
       setWakeWordStatus('idle');
     }
   }, [isActive, stopWakeWordListening]);
+
+  useEffect(() => {
+    if (status === 'disconnected') {
+      isStartingSessionRef.current = false;
+      shouldListenForWakeWordRef.current = true;
+    }
+  }, [status]);
+
+  useEffect(() => {
+    if (
+      status === 'disconnected' &&
+      !showAbout &&
+      !showDashboard &&
+      wakeWordStatus === 'idle'
+    ) {
+      const timer = window.setTimeout(() => {
+        startWakeWordListening();
+      }, 1200);
+      return () => window.clearTimeout(timer);
+    }
+  }, [showAbout, showDashboard, startWakeWordListening, status, wakeWordStatus]);
+
+  useEffect(() => {
+    return () => {
+      stopWakeWordListening();
+    };
+  }, [stopWakeWordListening]);
 
   // ===== DASHBOARD =====
   if (showDashboard) {
@@ -142,6 +207,12 @@ export function App() {
           <p className="text-base font-medium" style={{ color: isSpeaking ? 'var(--color-accent)' : 'var(--color-text-muted)' }}>
             {isSpeaking ? 'Halo is speaking...' : 'Listening...'}
           </p>
+
+          {sessionError && (
+            <p className="max-w-sm text-center text-sm" style={{ color: 'var(--color-danger)' }}>
+              {sessionError}
+            </p>
+          )}
 
           <button
             className="px-8 py-3 rounded-2xl text-sm font-medium cursor-pointer transition-all duration-300"
@@ -229,6 +300,12 @@ export function App() {
         <p className="max-w-sm text-center text-sm leading-relaxed font-normal animate-in-delay-2" style={{ color: '#57534e' }}>
           No judgment. No advice you didn't ask for. Just a warm voice to talk to whenever you need one.
         </p>
+
+        {sessionError && (
+          <p className="max-w-sm text-center text-sm animate-in-delay-2" style={{ color: 'var(--color-danger)' }}>
+            {sessionError}
+          </p>
+        )}
 
         <button
           className="w-full max-w-md mt-4 py-4 sm:py-5 rounded-2xl text-base sm:text-lg font-medium tracking-wide cursor-pointer transition-all duration-300 animate-in-delay-2"

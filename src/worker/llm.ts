@@ -67,7 +67,8 @@ BRAINSTORM / THINK TOGETHER:
 
 ===== MEMORY =====
 - You remember things people tell you across conversations.
-- If memories are provided below, reference them naturally: "Hey, how did that interview go?" or "Last time you mentioned..."
+- If memories are provided below, you MUST reference at least one naturally: "Hey, how did that interview go?" or "Last time you mentioned..."
+- Even on casual greetings like "hey" or "checking in", bring up something you remember about them.
 - Don't list memories. Weave them in like a real friend would.
 - If no memories are provided, just be present.
 
@@ -76,6 +77,52 @@ BRAINSTORM / THINK TOGETHER:
 - Be warm, real, and genuinely engaging
 - Speak naturally, like a voice call with a close friend
 - Make every conversation feel like the highlight of someone's day`;
+
+type ChatMessage = { role: string; content: string };
+
+function extractTextPart(part: unknown): string {
+  if (typeof part === 'string') return part;
+  if (!part || typeof part !== 'object') return '';
+
+  const record = part as Record<string, unknown>;
+  if (typeof record.text === 'string') return record.text;
+  if (typeof record.content === 'string') return record.content;
+  if (typeof record.transcript === 'string') return record.transcript;
+
+  const nestedText = record.text;
+  if (nestedText && typeof nestedText === 'object') {
+    const nested = nestedText as Record<string, unknown>;
+    if (typeof nested.value === 'string') return nested.value;
+  }
+
+  return '';
+}
+
+function normalizeContent(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => extractTextPart(part))
+      .filter(Boolean)
+      .join('\n')
+      .trim();
+  }
+  return extractTextPart(content).trim();
+}
+
+function normalizeMessages(messages: unknown[]): ChatMessage[] {
+  return messages
+    .map((message) => {
+      const record = (message && typeof message === 'object')
+        ? message as Record<string, unknown>
+        : {};
+
+      const role = typeof record.role === 'string' ? record.role : 'user';
+      const content = normalizeContent(record.content);
+      return { role, content };
+    })
+    .filter((message) => message.content.length > 0);
+}
 
 // Background task: extract memory + log to DO (runs after response streams)
 async function storeMemory(content: string, messages: Array<{ role: string; content: string }>, env: Env) {
@@ -116,16 +163,25 @@ async function storeMemory(content: string, messages: Array<{ role: string; cont
 export async function handleLLMChat(request: Request, env: Env, ctx?: ExecutionContext): Promise<Response> {
   const body = await request.json<{
     model?: string;
-    messages: Array<{ role: string; content: string }>;
+    messages: unknown[];
     tools?: unknown[];
     stream?: boolean;
   }>();
 
-  const userMessages = body.messages.filter((m) => m.role !== 'system');
+  const normalizedMessages = normalizeMessages(body.messages ?? []);
+  const userMessages = normalizedMessages.filter((m) => m.role !== 'system');
   const lastUserMsg = userMessages.filter((m) => m.role === 'user').pop();
 
+  console.log('[llm] request summary', JSON.stringify({
+    stream: body.stream ?? true,
+    toolsCount: Array.isArray(body.tools) ? body.tools.length : 0,
+    messageCount: normalizedMessages.length,
+    roles: normalizedMessages.map((m) => m.role),
+    lastUserChars: lastUserMsg?.content.length ?? 0,
+  }));
+
   // --- MEMORY RETRIEVAL (Vectorize) ---
-  // Search for memories about this user that are relevant to what they're saying
+  // Always retrieve recent memories — low threshold so even generic greetings get context
   let memoryContext = '';
   if (lastUserMsg?.content) {
     try {
@@ -134,16 +190,17 @@ export async function handleLLMChat(request: Request, env: Env, ctx?: ExecutionC
       })) as { data: number[][] };
       if (embedding.data?.[0]) {
         const results = await env.VECTOR_INDEX.query(embedding.data[0], {
-          topK: 3,
+          topK: 5,
           returnMetadata: 'all',
         });
+        // Low threshold — we want memories to surface even on generic check-ins
         const memories = results.matches
-          .filter((m) => m.score > 0.45)
-          .slice(0, 2)
+          .filter((m) => m.score > 0.3)
+          .slice(0, 3)
           .map((m) => (m.metadata as any)?.content || '')
           .filter(Boolean);
         if (memories.length > 0) {
-          memoryContext = `\n\nYOU REMEMBER (from past conversations — mention naturally if relevant, don't force it):\n${memories.map((m) => `- ${m}`).join('\n')}`;
+          memoryContext = `\n\nTHINGS YOU KNOW ABOUT THIS PERSON (reference naturally — especially on greetings/check-ins):\n${memories.map((m) => `- ${m}`).join('\n')}`;
         }
       }
     } catch {
@@ -175,6 +232,10 @@ export async function handleLLMChat(request: Request, env: Env, ctx?: ExecutionC
 
   if (!aiResponse.ok) {
     const errText = await aiResponse.text();
+    console.error('[llm] Workers AI request failed', JSON.stringify({
+      status: aiResponse.status,
+      detail: errText.slice(0, 1500),
+    }));
     return Response.json(
       { error: 'Workers AI request failed', detail: errText },
       { status: aiResponse.status }
