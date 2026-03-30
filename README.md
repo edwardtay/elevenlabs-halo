@@ -6,31 +6,35 @@ Voice companion app. Talk to an AI friend that remembers your conversations.
 
 ## Features
 
-- Voice conversation via ElevenLabs Conversational AI
-- Persistent memory across sessions (Vectorize + RAG)
-- Mood tracking and streak dashboard
+- Voice conversation via ElevenLabs Conversational AI SDK
+- Persistent memory — Halo remembers facts from past conversations via Vectorize RAG
+- Memory extraction — Llama 3.1 8B extracts normalized facts, stored as embeddings
+- Mood tracking dashboard with streak counter
 - Wake word activation ("Hello Halo")
-- Daily affirmation via ElevenLabs TTS
+- Spoken affirmation via ElevenLabs TTS API
 
 ## Architecture
 
 ```
 Browser (React)
-  └── ElevenLabs SDK → Custom LLM → Cloudflare Worker
-        ├── AI Gateway → Workers AI (Llama 3.3 70B)
-        ├── Workers AI (Llama 3.1 8B) → memory extraction
-        ├── Vectorize → memory storage + semantic retrieval
-        └── Durable Object → mood tracking, streak, history
+  └── ElevenLabs SDK (ConversationProvider)
+        └── Custom LLM → Cloudflare Worker
+              ├── AI Gateway → Workers AI (Llama 3.3 70B) — responses
+              ├── Vectorize — memory retrieval (semantic search)
+              ├── Workers AI (Llama 3.1 8B) — memory extraction (background)
+              ├── Vectorize — memory storage (background)
+              └── Durable Object — mood tracking, streak, history (background)
 ```
 
 ## API Endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/api/llm/chat` | Custom LLM (OpenAI-compatible, streaming) |
-| POST | `/api/affirmation` | Generate spoken affirmation (TTS) |
-| GET | `/api/stats` | Mood stats, streak, breakdown |
+| POST | `/api/llm/chat` | Custom LLM endpoint (OpenAI-compatible, streaming SSE) |
+| POST | `/api/affirmation` | Generate spoken affirmation (ElevenLabs TTS, returns audio/mpeg) |
+| GET | `/api/stats` | Mood stats, streak, mood breakdown |
 | GET | `/api/history` | Recent check-in history |
+| GET | `/api/health` | Health check |
 | POST | `/api/seed` | Seed Vectorize knowledge base |
 
 ## Stack
@@ -39,6 +43,7 @@ Browser (React)
 - **Backend:** Cloudflare Workers, Workers AI, AI Gateway, Durable Objects, Vectorize, Static Assets
 - **Voice:** ElevenLabs Conversational AI SDK, Text-to-Speech API
 - **LLM:** Llama 3.3 70B (responses), Llama 3.1 8B (memory extraction)
+- **Memory:** Vectorize (BGE base v1.5 embeddings, semantic retrieval with 0.3 threshold)
 
 ## Setup
 
@@ -79,10 +84,10 @@ src/
 │   ├── main.tsx          # React entry with ConversationProvider
 │   └── index.css         # Tailwind + theme variables
 └── worker/
-    ├── index.ts          # Worker router
-    ├── llm.ts            # Custom LLM with Vectorize RAG + memory
-    ├── agent.ts          # HaloAgent Durable Object
-    ├── affirmation.ts    # ElevenLabs TTS affirmation
-    ├── seed.ts           # Vectorize knowledge seeder
+    ├── index.ts          # Worker router (chat completion path matching, health check)
+    ├── llm.ts            # Custom LLM — system prompt, Vectorize RAG, memory extraction
+    ├── agent.ts          # HaloAgent Durable Object (mood detection, streak calc)
+    ├── affirmation.ts    # ElevenLabs TTS affirmation generator
+    ├── seed.ts           # Vectorize knowledge base seeder
     └── types.ts          # Env interface
 ```
