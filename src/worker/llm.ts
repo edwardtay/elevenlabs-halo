@@ -77,7 +77,43 @@ BRAINSTORM / THINK TOGETHER:
 - Speak naturally, like a voice call with a close friend
 - Make every conversation feel like the highlight of someone's day`;
 
-export async function handleLLMChat(request: Request, env: Env): Promise<Response> {
+// Background task: extract memory + log to DO (runs after response streams)
+async function storeMemory(content: string, messages: Array<{ role: string; content: string }>, env: Env) {
+  try {
+    const extraction = await env.AI.run('@cf/meta/llama-3.1-8b-instruct' as any, {
+      messages: [
+        { role: 'system', content: 'Extract one short factual memory about the user from this message. Focus on: people, events, goals, feelings, or situations. Output ONLY the fact, nothing else. Example: "User has a job interview at Google tomorrow." If no clear fact, output "none".' },
+        { role: 'user', content },
+      ],
+      max_tokens: 50,
+    }) as { response?: string };
+
+    const fact = extraction.response?.trim();
+    if (fact && fact.toLowerCase() !== 'none' && fact.length > 5) {
+      const embedding = (await env.AI.run('@cf/baai/bge-base-en-v1.5', {
+        text: [fact],
+      })) as { data: number[][] };
+      if (embedding.data?.[0]) {
+        await env.VECTOR_INDEX.upsert([{
+          id: `mem-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          values: embedding.data[0],
+          metadata: { content: fact, type: 'memory', timestamp: Date.now().toString() },
+        }]);
+      }
+    }
+  } catch {}
+
+  try {
+    const doId = env.HALO_AGENT.idFromName('default');
+    const stub = env.HALO_AGENT.get(doId);
+    await stub.fetch(new Request('http://do/log', {
+      method: 'POST',
+      body: JSON.stringify({ messages: messages.slice(-2) }),
+    }));
+  } catch {}
+}
+
+export async function handleLLMChat(request: Request, env: Env, ctx?: ExecutionContext): Promise<Response> {
   const body = await request.json<{
     model?: string;
     messages: Array<{ role: string; content: string }>;
@@ -115,53 +151,6 @@ export async function handleLLMChat(request: Request, env: Env): Promise<Respons
     }
   }
 
-  // --- MEMORY STORAGE (Vectorize + DO) ---
-  // Extract a normalized fact from the user's message and store it
-  if (lastUserMsg?.content && lastUserMsg.content.length > 20) {
-    try {
-      const raw = lastUserMsg.content;
-      // Use Workers AI to extract a concise memory fact
-      const extraction = await env.AI.run('@cf/meta/llama-3.1-8b-instruct' as any, {
-        messages: [
-          { role: 'system', content: 'Extract one short factual memory about the user from this message. Focus on: people, events, goals, feelings, or situations. Output ONLY the fact, nothing else. Example: "User has a job interview at Google tomorrow." If no clear fact, output "none".' },
-          { role: 'user', content: raw },
-        ],
-        max_tokens: 50,
-      }) as { response?: string };
-
-      const fact = extraction.response?.trim();
-      if (fact && fact.toLowerCase() !== 'none' && fact.length > 5) {
-        const embedding = (await env.AI.run('@cf/baai/bge-base-en-v1.5', {
-          text: [fact],
-        })) as { data: number[][] };
-        if (embedding.data?.[0]) {
-          const memId = `mem-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-          await env.VECTOR_INDEX.upsert([{
-            id: memId,
-            values: embedding.data[0],
-            metadata: {
-              content: fact,
-              type: 'memory',
-              timestamp: Date.now().toString(),
-            },
-          }]);
-        }
-      }
-    } catch {
-      // Memory extraction is best-effort
-    }
-
-    // Log to Durable Object for dashboard
-    try {
-      const doId = env.HALO_AGENT.idFromName('default');
-      const stub = env.HALO_AGENT.get(doId);
-      await stub.fetch(new Request('http://do/log', {
-        method: 'POST',
-        body: JSON.stringify({ messages: userMessages.slice(-2) }),
-      }));
-    } catch {}
-  }
-
   const enrichedMessages = [
     { role: 'system', content: SYSTEM_PROMPT + memoryContext },
     ...userMessages,
@@ -190,6 +179,11 @@ export async function handleLLMChat(request: Request, env: Env): Promise<Respons
       { error: 'Workers AI request failed', detail: errText },
       { status: aiResponse.status }
     );
+  }
+
+  // Store memory in background (non-blocking — runs after response streams)
+  if (lastUserMsg?.content && lastUserMsg.content.length > 20 && ctx) {
+    ctx.waitUntil(storeMemory(lastUserMsg.content, userMessages, env));
   }
 
   // Pass through the streaming SSE response (already in OpenAI format)

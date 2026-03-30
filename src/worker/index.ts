@@ -25,7 +25,7 @@ function doStub(env: Env) {
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     if (request.method === 'OPTIONS') {
       return new Response(null, { headers: CORS_HEADERS });
     }
@@ -35,7 +35,7 @@ export default {
     try {
       if (url.pathname === '/api/llm/chat' && request.method === 'POST') {
         const { handleLLMChat } = await import('./llm');
-        return corsResponse(await handleLLMChat(request, env));
+        return corsResponse(await handleLLMChat(request, env, ctx));
       }
       if (url.pathname === '/api/affirmation' && request.method === 'POST') {
         const { handleAffirmation } = await import('./affirmation');
